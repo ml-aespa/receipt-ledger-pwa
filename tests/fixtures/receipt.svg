@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1400" viewBox="0 0 1000 1400">
+  <rect width="1000" height="1400" fill="white"/>
+  <g fill="black" font-family="Arial, 'Yu Gothic', sans-serif" font-size="58">
+    <text x="100" y="130" font-size="82" font-weight="bold">LAWSON</text>
+    <text x="100" y="220">ローソン テスト店</text>
+    <text x="100" y="330">2026/09/25 12:30</text>
+    <text x="100" y="500">おにぎり        480円</text>
+    <text x="100" y="610">飲料            800円</text>
+    <line x1="90" y1="700" x2="910" y2="700" stroke="black" stroke-width="5"/>
+    <text x="100" y="820" font-size="76" font-weight="bold">お買上合計  ￥1,280</text>
+    <text x="100" y="940">内消費税         116円</text>
+    <text x="100" y="1050">お預り         2,000円</text>
+    <text x="100" y="1160">お釣り           720円</text>
+  </g>
+</svg>

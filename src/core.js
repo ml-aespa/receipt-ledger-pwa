@@ -9,7 +9,7 @@ export const PAYMENT_METHODS = [
   ['electronic', '電子マネー'], ['qr', 'QRコード決済'], ['other', 'その他']
 ].map(([id, name], order) => ({ id, name, order }));
 
-export const CONVENIENCE_ALIASES = ['コンビニ', 'セブンイレブン', 'セブン-イレブン', 'ファミリーマート', 'ファミマ', 'ローソン', 'ミニストップ', 'デイリーヤマザキ', 'セイコーマート'];
+export const CONVENIENCE_ALIASES = ['コンビニ', 'セブンイレブン', 'セブン-イレブン', '7-eleven', 'ファミリーマート', 'ファミマ', 'familymart', 'ローソン', 'lawson', 'ミニストップ', 'ministop', 'デイリーヤマザキ', 'セイコーマート'];
 export const MAX_AMOUNT = 999_999_999;
 
 export function localISO(date = new Date()) {

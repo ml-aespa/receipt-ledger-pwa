@@ -1,7 +1,15 @@
-const CACHE = 'receipt-ledger-shell-v2';
+const CACHE = 'receipt-ledger-shell-v4-ocr-photo';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg',
-  './src/app.js', './src/core.js', './src/db.js'
+  './src/app.js', './src/core.js', './src/db.js', './src/ocr.js',
+  './vendor/ocr/tesseract.min.js', './vendor/ocr/worker.min.js',
+  './vendor/ocr/lang/jpn.traineddata.gz', './vendor/ocr/lang/eng.traineddata.gz',
+  './vendor/ocr/core/tesseract-core.js', './vendor/ocr/core/tesseract-core.wasm', './vendor/ocr/core/tesseract-core.wasm.js',
+  './vendor/ocr/core/tesseract-core-lstm.js', './vendor/ocr/core/tesseract-core-lstm.wasm', './vendor/ocr/core/tesseract-core-lstm.wasm.js',
+  './vendor/ocr/core/tesseract-core-simd.js', './vendor/ocr/core/tesseract-core-simd.wasm', './vendor/ocr/core/tesseract-core-simd.wasm.js',
+  './vendor/ocr/core/tesseract-core-simd-lstm.js', './vendor/ocr/core/tesseract-core-simd-lstm.wasm', './vendor/ocr/core/tesseract-core-simd-lstm.wasm.js',
+  './vendor/ocr/core/tesseract-core-relaxedsimd.js', './vendor/ocr/core/tesseract-core-relaxedsimd.wasm', './vendor/ocr/core/tesseract-core-relaxedsimd.wasm.js',
+  './vendor/ocr/core/tesseract-core-relaxedsimd-lstm.js', './vendor/ocr/core/tesseract-core-relaxedsimd-lstm.wasm', './vendor/ocr/core/tesseract-core-relaxedsimd-lstm.wasm.js'
 ];
 
 self.addEventListener('install', event => {

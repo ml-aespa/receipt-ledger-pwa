@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="支出手帳">
   <meta name="description" content="端末内だけで使える個人向け支出手帳">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/icon.svg">
   <link rel="stylesheet" href="./styles.css">
@@ -18,7 +18,11 @@
   <a class="skip-link" href="#main">本文へ移動</a>
   <header class="app-header">
     <div><p class="eyebrow">端末内に保存</p><h1 id="page-title">ホーム</h1></div>
-    <button id="add-button" class="icon-button primary" type="button" aria-label="支出を追加">＋</button>
+    <div class="header-actions">
+      <button id="scan-button" class="icon-button" type="button" aria-label="レシートを撮影して自動入力">▣</button>
+      <button id="add-button" class="icon-button primary" type="button" aria-label="支出を手入力で追加">＋</button>
+    </div>
+    <input id="receipt-image" class="sr-only" type="file" accept="image/*" capture="environment">
   </header>
 
   <main id="main" tabindex="-1">
@@ -57,8 +61,33 @@
     <article><h2 id="confirm-title">支出を削除しますか？</h2><p id="confirm-message"></p><div class="button-row"><button id="cancel-delete" type="button">キャンセル</button><button id="confirm-delete" type="button" class="danger">削除</button></div></article>
   </dialog>
 
+  <dialog id="ocr-dialog" aria-labelledby="ocr-title">
+    <article>
+      <div class="dialog-header"><button type="button" id="cancel-ocr" class="text-button">閉じる</button><h2 id="ocr-title">レシートを読み取り</h2><span></span></div>
+      <img id="receipt-preview" class="receipt-preview" alt="選択したレシート画像">
+      <div id="ocr-progress" class="ocr-progress" role="status" aria-live="polite"><progress id="ocr-progress-bar" max="100" value="0"></progress><p>OCRを準備しています…</p></div>
+      <div id="ocr-error" class="error-panel" role="alert" hidden></div>
+      <div id="ocr-results" hidden>
+        <p id="ocr-confidence" class="muted caption"></p>
+        <label>店名候補<select id="ocr-merchant-select"></select></label>
+        <label id="ocr-merchant-manual-label" hidden>店名を手入力<input id="ocr-merchant-manual" type="text" maxlength="100"></label>
+        <label>利用日<select id="ocr-date-select"></select></label>
+        <label>金額候補<select id="ocr-amount-select"></select><span class="muted caption">レシートの合計と一致する候補を選んでください。保存直前にも確認します。</span></label>
+        <label>カテゴリ<select id="ocr-category-select"></select><span id="ocr-category-reason" class="muted caption"></span></label>
+        <label>支払方法<select id="ocr-payment-select"></select></label>
+        <details><summary>OCR原文を確認</summary><textarea id="ocr-raw-text" rows="8" readonly></textarea></details>
+        <button id="apply-ocr" type="button" class="primary wide-button">入力画面で最終確認</button>
+      </div>
+    </article>
+  </dialog>
+
+  <dialog id="amount-confirm-dialog" aria-labelledby="amount-confirm-title">
+    <article><h2 id="amount-confirm-title">金額を最終確認</h2><p>レシート記載の合計金額と一致していますか？</p><p id="amount-confirm-value" class="hero-amount"></p><div class="button-row"><button id="cancel-amount-confirm" type="button">入力へ戻る</button><button id="accept-amount-confirm" type="button" class="primary">この金額で登録</button></div></article>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <noscript><p class="error-panel">このアプリを使うにはJavaScriptを有効にしてください。</p></noscript>
+  <script src="./vendor/ocr/tesseract.min.js"></script>
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>

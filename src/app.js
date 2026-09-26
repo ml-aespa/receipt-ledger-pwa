@@ -3,6 +3,7 @@ import {
   filterExpenses, localISO, money, monthlySummary, parseISO, parseQuestion, sixMonthTotals, validateExpense
 } from './core.js';
 import { deleteExpense, listExpenses, saveExpense } from './db.js';
+import { extractReceiptFields, recognizeReceipt } from './ocr.js';
 
 const $ = selector => document.querySelector(selector);
 const views = ['home', 'history', 'analysis', 'question'];
@@ -18,6 +19,11 @@ let selectedExpenseId = null;
 let historyFilters = { month: '', categoryId: '', search: '' };
 let analysisMonth = localISO().slice(0, 7);
 let questionState = { input: '', result: null, message: '' };
+let formSource = 'manual';
+let formOCR = { text: '', confidence: null };
+let ocrDraft = null;
+let receiptPreviewURL = null;
+let pendingSave = null;
 
 function formatDate(value) {
   const { year, month, day } = parseISO(value);
@@ -167,16 +173,18 @@ function bindExpenseRows() {
 
 function resetErrors() { ['date-error','amount-error','category-error'].forEach(id => $(`#${id}`).textContent = ''); $('#save-error').hidden = true; }
 
-function openForm(record = null) {
+function openForm(record = null, prefill = null) {
   resetErrors();
   $('#form-title').textContent = record ? '支出を編集' : '支出を追加';
   $('#expense-id').value = record?.id || '';
-  $('#expense-date').value = record?.date || localISO(); $('#expense-date').max = localISO();
-  $('#merchant').value = record?.merchant || ''; $('#amount').value = record?.amount || '';
+  $('#expense-date').value = prefill?.date || record?.date || localISO(); $('#expense-date').max = localISO();
+  $('#merchant').value = prefill?.merchant || record?.merchant || ''; $('#amount').value = prefill?.amount || record?.amount || '';
   $('#category').innerHTML = CATEGORIES.map(item => `<option value="${item.id}">${html(item.name)}</option>`).join('');
-  $('#category').value = record?.categoryId || 'uncategorized';
+  $('#category').value = prefill?.categoryId || record?.categoryId || 'uncategorized';
   $('#payment').innerHTML = `<option value="">未選択</option>${PAYMENT_METHODS.map(item => `<option value="${item.id}">${html(item.name)}</option>`).join('')}`;
-  $('#payment').value = record?.paymentId || ''; $('#memo').value = record?.memo || '';
+  $('#payment').value = prefill?.paymentId || record?.paymentId || ''; $('#memo').value = prefill?.memo || record?.memo || '';
+  formSource = prefill?.source || record?.source || 'manual';
+  formOCR = { text: prefill?.ocrText || record?.ocrText || '', confidence: prefill?.ocrConfidence ?? record?.ocrConfidence ?? null };
   $('#expense-dialog').showModal();
 }
 
@@ -199,8 +207,89 @@ function toast(message) {
   setTimeout(() => { element.hidden = true; }, 2200);
 }
 
+function progressLabel(status) {
+  return ({
+    'preparing image':'写真をOCR用に整えています…',
+    'loading tesseract core':'OCRエンジンを読み込み中…', 'initializing tesseract':'OCRエンジンを初期化中…',
+    'loading language traineddata':'日本語辞書を読み込み中…', 'initializing api':'文字認識を準備中…',
+    'recognizing text':'レシートの文字を読み取り中…'
+  })[status] || 'レシートを処理中…';
+}
+
+function closeOCRDialog() {
+  $('#ocr-dialog').close();
+  if (receiptPreviewURL) { URL.revokeObjectURL(receiptPreviewURL); receiptPreviewURL = null; }
+}
+
+async function scanReceipt(file) {
+  if (!file?.type.startsWith('image/')) { toast('画像ファイルを選択してください'); return; }
+  if (file.size > 25 * 1024 * 1024) { toast('画像は25MB以下にしてください'); return; }
+  if (receiptPreviewURL) URL.revokeObjectURL(receiptPreviewURL);
+  receiptPreviewURL = URL.createObjectURL(file);
+  $('#receipt-preview').src = receiptPreviewURL;
+  $('#ocr-progress').hidden = false; $('#ocr-progress-bar').value = 0; $('#ocr-progress p').textContent = 'OCRを準備しています…';
+  $('#ocr-results').hidden = true; $('#ocr-error').hidden = true; $('#ocr-dialog').showModal();
+  try {
+    const recognized = await recognizeReceipt(file, message => {
+      $('#ocr-progress p').textContent = progressLabel(message.status);
+      $('#ocr-progress-bar').value = Math.round((message.progress || 0) * 100);
+    });
+    ocrDraft = { ...extractReceiptFields(recognized.text), confidence: recognized.confidence };
+    populateOCRResults(ocrDraft);
+    $('#ocr-progress').hidden = true; $('#ocr-results').hidden = false;
+  } catch (error) {
+    const detail = error?.message || (typeof error === 'string' ? error : '画像形式または画像内容を認識できませんでした。');
+    $('#ocr-progress').hidden = true; $('#ocr-error').textContent = `読み取りできませんでした。画像を撮り直すか、手入力をお使いください。\n${detail}`; $('#ocr-error').hidden = false;
+  }
+}
+
+function populateOCRResults(result) {
+  $('#ocr-confidence').textContent = `OCR信頼度の目安：${Math.round(result.confidence)}%。候補は必ずレシートと照合してください。`;
+  $('#ocr-merchant-select').innerHTML = `${result.merchantCandidates.map(item => `<option value="${html(item.value)}">${html(item.value)}</option>`).join('')}<option value="__manual__">読み取れない／別の店名を入力</option>`;
+  if (!result.merchantCandidates.length) $('#ocr-merchant-select').value = '__manual__';
+  $('#ocr-merchant-manual-label').hidden = $('#ocr-merchant-select').value !== '__manual__';
+  $('#ocr-date-select').innerHTML = `${result.dateCandidates.map(value => `<option value="${value}">${html(formatDate(value))}</option>`).join('')}<option value="${localISO()}">読み取れない／今日を使用</option>`;
+  $('#ocr-amount-select').innerHTML = `<option value="">読み取れない／手入力する</option>${result.amountCandidates.map(item => `<option value="${item.value}">${money(BigInt(item.value))} — ${html(item.line.slice(0, 40))}</option>`).join('')}`;
+  if (result.amountCandidates.length) $('#ocr-amount-select').value = String(result.amountCandidates[0].value);
+  $('#ocr-category-select').innerHTML = CATEGORIES.map(item => `<option value="${item.id}">${html(item.name)}</option>`).join('');
+  $('#ocr-category-select').value = result.category.id;
+  $('#ocr-category-reason').textContent = `${result.category.reason}。違う場合は必ず選び直してください。`;
+  $('#ocr-payment-select').innerHTML = `<option value="">読み取れない／未選択</option>${PAYMENT_METHODS.map(item => `<option value="${item.id}">${html(item.name)}</option>`).join('')}`;
+  $('#ocr-raw-text').value = result.rawText;
+}
+
+async function persistRecord(record, existing) {
+  const saveButton = $('#save-form'); saveButton.disabled = true; saveButton.textContent = '保存中…';
+  const confirmButton = $('#accept-amount-confirm'); confirmButton.disabled = true;
+  try {
+    await saveExpense(record); await reload();
+    if ($('#amount-confirm-dialog').open) $('#amount-confirm-dialog').close();
+    if ($('#expense-dialog').open) $('#expense-dialog').close();
+    pendingSave = null; toast(existing ? '更新しました' : '保存しました');
+  } catch (error) {
+    if ($('#amount-confirm-dialog').open) $('#amount-confirm-dialog').close();
+    $('#save-error').textContent = `保存できませんでした。入力内容は保持されています。\n${error.message}`; $('#save-error').hidden = false;
+  } finally {
+    saveButton.disabled = false; saveButton.textContent = '保存'; confirmButton.disabled = false;
+  }
+}
+
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => switchTab(button.dataset.tab)));
 $('#add-button').addEventListener('click', () => openForm());
+$('#scan-button').addEventListener('click', () => { $('#receipt-image').value = ''; $('#receipt-image').click(); });
+$('#receipt-image').addEventListener('change', event => { if (event.target.files?.[0]) scanReceipt(event.target.files[0]); });
+$('#cancel-ocr').addEventListener('click', closeOCRDialog);
+$('#ocr-merchant-select').addEventListener('change', event => { $('#ocr-merchant-manual-label').hidden = event.target.value !== '__manual__'; });
+$('#apply-ocr').addEventListener('click', () => {
+  if (!ocrDraft) return;
+  const merchantSelection = $('#ocr-merchant-select').value;
+  const prefill = {
+    date: $('#ocr-date-select').value, merchant: merchantSelection === '__manual__' ? $('#ocr-merchant-manual').value.trim() : merchantSelection,
+    amount: $('#ocr-amount-select').value, categoryId: $('#ocr-category-select').value, paymentId: $('#ocr-payment-select').value || null,
+    memo: '', source: 'receipt_ocr', ocrText: ocrDraft.rawText, ocrConfidence: ocrDraft.confidence
+  };
+  closeOCRDialog(); openForm(null, prefill);
+});
 $('#cancel-form').addEventListener('click', () => $('#expense-dialog').close());
 $('#close-detail').addEventListener('click', () => $('#detail-dialog').close());
 $('#edit-expense').addEventListener('click', () => { const record = expenses.find(item => item.id === selectedExpenseId); $('#detail-dialog').close(); openForm(record); });
@@ -212,19 +301,30 @@ $('#confirm-delete').addEventListener('click', async () => {
   catch (error) { $('#confirm-message').textContent = `削除できませんでした。${error.message}`; }
   finally { button.disabled = false; }
 });
+$('#cancel-amount-confirm').addEventListener('click', () => { $('#amount-confirm-dialog').close(); pendingSave = null; });
+$('#accept-amount-confirm').addEventListener('click', () => { if (pendingSave) persistRecord(pendingSave.record, pendingSave.existing); });
 
 $('#expense-form').addEventListener('submit', async event => {
   event.preventDefault(); resetErrors();
   const input = { date: $('#expense-date').value, merchant: $('#merchant').value.trim(), amount: $('#amount').value, categoryId: $('#category').value, paymentId: $('#payment').value || null, memo: $('#memo').value.trim() };
   const validation = validateExpense(input);
   if (!validation.valid) { Object.entries(validation.errors).forEach(([key,value]) => $(`#${key}-error`).textContent = value); return; }
-  const saveButton = $('#save-form'); if (saveButton.disabled) return; saveButton.disabled = true; saveButton.textContent = '保存中…';
+  const saveButton = $('#save-form'); if (saveButton.disabled) return;
   const existing = expenses.find(item => item.id === $('#expense-id').value);
   const now = new Date().toISOString();
-  const record = { id: existing?.id || uuid(), date: input.date, merchant: input.merchant, amount: validation.value, categoryId: input.categoryId, paymentId: input.paymentId, memo: input.memo, createdAt: existing?.createdAt || now, updatedAt: now, schemaVersion: 1 };
-  try { await saveExpense(record); await reload(); $('#expense-dialog').close(); toast(existing ? '更新しました' : '保存しました'); }
-  catch (error) { $('#save-error').textContent = `保存できませんでした。入力内容は保持されています。\n${error.message}`; $('#save-error').hidden = false; }
-  finally { saveButton.disabled = false; saveButton.textContent = '保存'; }
+  const record = {
+    id: existing?.id || uuid(), date: input.date, merchant: input.merchant, amount: validation.value,
+    categoryId: input.categoryId, paymentId: input.paymentId, memo: input.memo,
+    createdAt: existing?.createdAt || now, updatedAt: now, schemaVersion: 1,
+    source: formSource, ocrText: formOCR.text || existing?.ocrText || '', ocrConfidence: formOCR.confidence ?? existing?.ocrConfidence ?? null
+  };
+  if (formSource === 'receipt_ocr') {
+    pendingSave = { record, existing };
+    $('#amount-confirm-value').textContent = money(BigInt(record.amount));
+    $('#amount-confirm-dialog').showModal();
+  } else {
+    await persistRecord(record, existing);
+  }
 });
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { const current = localISO().slice(0,7); if (analysisMonth > current) analysisMonth = current; renderAll(); } });
