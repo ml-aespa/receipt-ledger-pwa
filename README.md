@@ -1,0 +1,101 @@
+# 支出手帳 PWA版 — MacなしでiPhoneから使う手順
+
+このフォルダだけを静的Webサイトとして公開すると、iPhoneのホーム画面へアプリとして追加できます。サーバー処理、外部API、外部ライブラリ、ユーザー登録はありません。支出データと質問内容は公開先へ送らず、iPhoneのIndexedDBへ保存します。
+
+公開されるソースコードに実際の支出データは含まれません。本番用サンプルデータもありません。
+
+## 1. GitHub Pagesへ無料公開する
+
+GitHubアカウントを持っていない場合は、最初に作成してください。無料プランではPages用リポジトリを公開リポジトリにする必要があります。公開されるのはアプリのプログラムだけです。
+
+1. GitHubで右上の `＋` → `New repository` を開きます。
+2. Repository nameを `receipt-ledger-pwa` などにします。
+3. `Public` を選び、`Create repository` を押します。
+4. 作成されたページで `uploading an existing file` を押します。
+5. Windowsでこの `web` フォルダを開き、中身をすべてアップロードします。`web` フォルダ自体を一段上に置かず、公開リポジトリの直下に `index.html` が見える状態にしてください。
+6. アップロード対象に次があることを確認して、変更を確定します。
+
+```text
+index.html
+styles.css
+manifest.webmanifest
+sw.js
+src/
+icons/
+```
+
+7. リポジトリの `Settings` → 左側の `Pages` を開きます。
+8. `Build and deployment` のSourceを `Deploy from a branch` にします。
+9. Branchを `main`、フォルダを `/(root)` にして `Save` を押します。
+10. 数分待ち、Pages画面に表示された `https://ユーザー名.github.io/receipt-ledger-pwa/` を開きます。反映に時間がかかる場合があります。
+
+GitHub公式手順: <https://docs.github.com/en/pages/quickstart>
+
+## 2. iPhoneへアプリとして追加する
+
+1. iPhoneのSafariで、発行されたPagesのURLを開きます。プライベートブラウズは使わないでください。
+2. ホーム画面が表示されたら一度再読み込みし、数秒待ちます。これでオフライン用ファイルが端末へ保存されます。
+3. Safariのページメニューまたは共有ボタンを押し、`ホーム画面に追加` を選びます。
+4. `Webアプリとして開く` をオンにします。
+5. 名前を確認して `追加` を押します。
+6. ホーム画面に追加された「支出手帳」を開きます。
+
+Apple公式手順: <https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios>
+
+## 3. オフライン動作を確認する
+
+1. アプリでテスト用の支出を1件登録します。
+2. アプリを閉じ、機内モードをオンにします。
+3. ホーム画面の「支出手帳」を開きます。
+4. 登録した支出が残り、ホーム、履歴、分析、質問を使えることを確認します。
+5. 確認後、機内モードを元に戻します。
+
+初回公開ページを開く前、またはService Workerの保存完了前はオフライン起動できません。
+
+## 重要なデータ保護上の注意
+
+- データは、そのiPhone上の、その公開URL専用のブラウザ保存領域にあります。
+- Safariの「履歴とWebサイトデータを消去」、Webサイトデータの個別削除、端末初期化などで消える可能性があります。
+- PagesのURLやリポジトリ名を変更すると、別アプリの保存領域として扱われます。
+- Safariのプライベートブラウズでは永続利用しないでください。
+- iOSの端末バックアップに含まれるかどうかはOS設定と挙動に依存し、このアプリは保証しません。
+- 初版には独自の暗号化バックアップ／復元はありません。重要データの唯一の保管先として使う前に、この制約を理解してください。
+
+## 更新方法
+
+PC内のファイルを変更しただけではiPhoneへは反映されません。次の操作が必要です。
+
+1. 修正した `web` フォルダのファイルを、同じGitHubリポジトリの同じ場所へアップロードします。
+2. GitHub Pagesの公開処理が完了するまで待ちます。
+3. iPhoneをオンラインにして、ホーム画面の「支出手帳」を開きます。
+4. アプリを完全に閉じ、もう一度開きます。表示が古い場合はSafariでPages URLを再読み込みしてから、ホーム画面版を開き直します。
+
+Service Workerはオンライン時に同じPages URLからアプリファイルの最新版を確認し、取得できない場合は端末キャッシュへ切り替えます。支出データや質問内容はこの確認通信へ含まれません。
+
+既存の支出データはプログラムとは別のIndexedDBにあるため、次の条件を守れば通常の画面・集計・検索修正では保持されます。
+
+- GitHub PagesのURLを変えない
+- リポジトリ名を変えない
+- IndexedDBの名前 `receipt-ledger-local-v1` を不用意に変えない
+- データ構造を変更するときは移行処理を追加する
+
+公開URLを変えた場合、iPhoneからは別アプリの保存領域として見えるため、以前のデータは新しいURLへ自動移動しません。
+
+## Windowsでの事前確認
+
+Node.jsがある場合:
+
+```powershell
+cd C:\Users\htaro\OneDrive\Desktop\codex\web
+node --test tests/*.test.js
+node tools/serve.mjs
+```
+
+その後、PCのブラウザで `http://127.0.0.1:4173` を開きます。これはPC内のプレビュー用です。iPhoneへのインストールにはHTTPSのPages URLを使ってください。
+
+## 実装上のプライバシー対策
+
+- IndexedDB以外へ支出を保存しません。
+- `fetch`、XMLHttpRequest、WebSocket、Beacon、解析SDKをアプリコードに含めていません。
+- Content Security Policyで `connect-src 'none'` を指定し、アプリコードからの外部通信を禁止しています。
+- Service Workerはオンライン時にアプリ本体の更新を確認し、オフライン時は保存済みキャッシュを使います。GitHub PagesやSafari自身による更新確認など、ブラウザ／ホスティング基盤の通信まで完全に禁止するものではありません。
