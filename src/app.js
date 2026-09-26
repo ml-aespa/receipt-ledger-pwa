@@ -1,5 +1,5 @@
 import {
-  CATEGORIES, PAYMENT_METHODS, addMonths, categoryTotals, checkedSum, dailyTotals, dateRange, executeQuestion,
+  CATEGORIES, PAYMENT_METHODS, addCalendarDays, addMonths, categoryTotals, checkedSum, dailyTotals, dateRange, executeQuestion,
   filterExpenses, localISO, money, monthlySummary, parseISO, parseQuestion, sixMonthTotals, validateExpense
 } from './core.js';
 import { deleteExpense, listExpenses, saveExpense } from './db.js';
@@ -91,6 +91,12 @@ function valueList(data) {
   return `<details><summary>数値を一覧で確認</summary>${data.map(item => `<div class="stat-row"><span>${html(item.name || item.label)}</span><span class="stat-value">${money(item.amount)}</span></div>`).join('')}</details>`;
 }
 
+function dailyTotalList(data) {
+  const spent = data.filter(item => item.amount > 0n);
+  if (!spent.length) return '';
+  return `<div class="daily-totals"><h3>日別合計</h3>${spent.map(item => `<div class="stat-row"><span>${html(item.label)}</span><span class="stat-value">${money(item.amount)}</span></div>`).join('')}</div>`;
+}
+
 function renderAnalysis() {
   const summary = monthlySummary(expenses, analysisMonth);
   const daily = dailyTotals(expenses, analysisMonth);
@@ -101,7 +107,7 @@ function renderAnalysis() {
   $('#analysis-view').innerHTML = `
     <div class="month-nav"><button id="prev-month" type="button" aria-label="前の月">‹</button><strong>${html(analysisMonth.replace('-', '年'))}月</strong><button id="next-month" type="button" aria-label="次の月" ${isCurrent ? 'disabled' : ''}>›</button></div>
     <section class="card"><div class="stat-row"><span>支出合計</span><span class="stat-value">${money(summary.total)}</span></div><div class="stat-row"><span>登録件数</span><span class="stat-value">${summary.count}件</span></div><div class="stat-row"><span>1件あたり</span><span class="stat-value">${summary.average === null ? '—' : money(summary.average)}</span></div><div class="stat-row"><span>最多カテゴリ</span><span class="stat-value">${html(top)}</span></div><div class="stat-row"><span>前月との差</span><span class="stat-value">${comparisonText(summary)}</span></div>${isCurrent ? '<p class="muted caption">今月の記録済み合計と前月全体を比較しています。</p>' : ''}</section>
-    <section class="card"><h2>日別支出</h2>${verticalChart(daily, `${analysisMonth}の日別支出`)}${valueList(daily)}</section>
+    <section class="card"><h2>日別支出</h2>${verticalChart(daily, `${analysisMonth}の日別支出`)}${dailyTotalList(daily)}${valueList(daily)}</section>
     <section class="card"><h2>カテゴリ別支出</h2>${horizontalChart(categories)}${categories.length ? valueList(categories) : ''}</section>
     <section class="card"><h2>直近6か月の推移</h2>${verticalChart(months, `${analysisMonth}までの6か月支出`)}${valueList(months)}</section>
     <p class="muted caption">週の開始：${firstWeekday === 0 ? '日曜日' : firstWeekday === 1 ? '月曜日' : `端末設定（${firstWeekday}）`}</p>`;
@@ -109,13 +115,13 @@ function renderAnalysis() {
   $('#next-month').addEventListener('click', () => { analysisMonth = addMonths(analysisMonth, 1); renderAnalysis(); });
 }
 
-const examples = ['今週、外食にいくら使った？', '今月の支出合計は？', '先月の食費はいくら？', '昨日のコンビニ代を見せて', '今月一番使ったカテゴリは？', '1万円以上の支出を見せて', '未分類の支出は何件ある？', '今年の外食費を月別に表示して'];
+const examples = ['今月の趣味・娯楽の合計は？', '今週、外食にいくら使った？', '今月の支出合計は？', '先月の食費はいくら？', '医療費を見せて', '昨日のコンビニ代を見せて', '今月一番使ったカテゴリは？', '1万円以上の支出を見せて', '未分類の支出は何件ある？', '今年の外食費を月別に表示して'];
 
 function periodName(period) { return ({ all:'全期間', today:'今日', yesterday:'昨日', thisWeek:'今週', lastWeek:'先週', thisMonth:'今月', lastMonth:'先月', thisYear:'今年', lastYear:'去年' })[period]; }
 
 function conditionText(result) {
   const { query, range } = result;
-  const lines = [`期間：${periodName(query.period)}${range ? `（${formatDate(range.start)}以上、${formatDate(range.end)}未満）` : ''}`];
+  const lines = [`期間：${periodName(query.period)}${range ? `（${formatDate(range.start)}～${formatDate(addCalendarDays(range.end, -1))}）` : ''}`];
   if (query.categoryIds.length) lines.push(`カテゴリ：${query.categoryIds.map(categoryName).join('・')}`);
   if (query.merchant?.type === 'convenience') lines.push('店名：コンビニ辞書一致');
   if (query.merchant?.type === 'contains') lines.push(`店名に「${query.merchant.value}」を含む`);
@@ -146,7 +152,7 @@ function runQuestion(value) {
 function renderQuestion() {
   const result = questionState.result;
   $('#question-view').innerHTML = `
-    <section class="card"><label>支出について質問<textarea id="question-input" rows="3" placeholder="今月の支出合計は？">${html(questionState.input)}</textarea></label><button id="ask-button" type="button" class="primary">質問する</button></section>
+    <section class="card"><label>支出について質問<textarea id="question-input" rows="3" placeholder="例：今月の趣味・娯楽の合計は？">${html(questionState.input)}</textarea></label><p class="muted caption">期間とカテゴリを組み合わせて、「合計」「何件」「見せて」などと質問できます。全カテゴリに対応しています。</p><button id="ask-button" type="button" class="primary">質問する</button></section>
     <section class="card"><h2>質問例</h2><div class="question-examples">${examples.map(example => `<button type="button" data-question="${html(example)}">${html(example)}</button>`).join('')}</div></section>
     ${questionState.message ? `<section class="card error-panel"><h2>解釈できませんでした</h2><p>${html(questionState.message)}</p><p class="caption">例：今月の支出合計は？／1万円以上の支出を見せて</p></section>` : ''}
     ${result ? `<section class="card"><h2>適用した条件</h2><div class="condition-box">${html(conditionText(result))}</div></section><section class="card"><h2>回答</h2><p><strong>${html(answerText(result))}</strong></p>${result.query.merchant?.type === 'convenience' ? '<p class="muted caption">店名のコンビニ辞書で抽出しています。辞書にない店舗は対象外です。</p>' : ''}${!result.records.length ? '<p class="muted">条件に一致する支出はありません。</p>' : ''}</section>${result.months.length ? `<section class="card"><h2>月別</h2>${verticalChart(result.months, '月別支出')}${valueList(result.months)}</section>` : ''}<section class="card"><h2>根拠となる明細（${result.records.length}件）</h2>${expenseRows(result.records)}</section>` : ''}`;
@@ -249,7 +255,7 @@ function populateOCRResults(result) {
   if (!result.merchantCandidates.length) $('#ocr-merchant-select').value = '__manual__';
   $('#ocr-merchant-manual-label').hidden = $('#ocr-merchant-select').value !== '__manual__';
   $('#ocr-date-select').innerHTML = `${result.dateCandidates.map(value => `<option value="${value}">${html(formatDate(value))}</option>`).join('')}<option value="${localISO()}">読み取れない／今日を使用</option>`;
-  $('#ocr-amount-select').innerHTML = `<option value="">読み取れない／手入力する</option>${result.amountCandidates.map(item => `<option value="${item.value}">${money(BigInt(item.value))} — ${html(item.line.slice(0, 40))}</option>`).join('')}`;
+  $('#ocr-amount-select').innerHTML = `<option value="">読み取れない／手入力する</option>${result.amountCandidates.map(item => `<option value="${item.value}">${money(BigInt(item.value))}</option>`).join('')}`;
   if (result.amountCandidates.length) $('#ocr-amount-select').value = String(result.amountCandidates[0].value);
   $('#ocr-category-select').innerHTML = CATEGORIES.map(item => `<option value="${item.id}">${html(item.name)}</option>`).join('');
   $('#ocr-category-select').value = result.category.id;
@@ -262,7 +268,7 @@ async function persistRecord(record, existing) {
   const saveButton = $('#save-form'); saveButton.disabled = true; saveButton.textContent = '保存中…';
   const confirmButton = $('#accept-amount-confirm'); confirmButton.disabled = true;
   try {
-    await saveExpense(record); await reload();
+    await saveExpense(record); analysisMonth = record.date.slice(0, 7); await reload();
     if ($('#amount-confirm-dialog').open) $('#amount-confirm-dialog').close();
     if ($('#expense-dialog').open) $('#expense-dialog').close();
     pendingSave = null; toast(existing ? '更新しました' : '保存しました');

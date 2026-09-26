@@ -1,4 +1,4 @@
-const CACHE = 'receipt-ledger-shell-v4-ocr-photo';
+const CACHE = 'receipt-ledger-shell-v5-usability';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg',
   './src/app.js', './src/core.js', './src/db.js', './src/ocr.js',

@@ -46,7 +46,22 @@ test('絞り込みAND、店名・メモOR、0補完', () => {
   const filtered = filterExpenses(records, { month:'2026-03', categoryId:'dining', search:'青空' });
   assert.equal(filtered.length,1); assert.equal(checkedSum(filtered),100n);
   assert.equal(dailyTotals(records,'2026-03').length,31);
+  assert.equal(dailyTotals(records,'2026-03').find(item => item.key === '2026-03-02').amount, 200n);
   assert.equal(sixMonthTotals([], '2026-03').length,6);
+});
+
+test('全カテゴリを自然な質問文で検索できる', () => {
+  const cases = [
+    ['趣味・娯楽の合計', ['entertainment']], ['今月の日用品はいくら？', ['daily_goods']],
+    ['先月の交通費の合計', ['transport']], ['今年の衣服の合計は？', ['clothing']],
+    ['医療費を見せて', ['medical']], ['今月の光熱・通信の総額', ['utilities']],
+    ['その他は何件ある？', ['other']]
+  ];
+  for (const [question, ids] of cases) {
+    const parsed = parseQuestion(question);
+    assert.equal(parsed.status, 'success', question);
+    assert.deepEqual(parsed.query.categoryIds, ids, question);
+  }
 });
 
 test('必須質問例をすべて解析', () => {

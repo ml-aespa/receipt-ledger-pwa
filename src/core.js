@@ -146,38 +146,70 @@ export function sixMonthTotals(records, monthKey) {
   });
 }
 
+const QUESTION_CATEGORY_ALIASES = [
+  { words: ['趣味・娯楽', '趣味娯楽', '娯楽費', '趣味', '娯楽'], ids: ['entertainment'] },
+  { words: ['光熱・通信', '光熱通信', '光熱費', '通信費'], ids: ['utilities'] },
+  { words: ['食料品', 'スーパー'], ids: ['groceries'] },
+  { words: ['日用品', '生活用品'], ids: ['daily_goods'] },
+  { words: ['交通費', '交通'], ids: ['transport'] },
+  { words: ['衣服', '衣料品', '衣料'], ids: ['clothing'] },
+  { words: ['医療費', '医療'], ids: ['medical'] },
+  { words: ['外食費', '外食'], ids: ['dining'] },
+  { words: ['未分類'], ids: ['uncategorized'] },
+  { words: ['その他'], ids: ['other'] }
+];
+
 export function parseQuestion(input) {
-  const text = String(input).normalize('NFKC').replace(/[\s、]/g, '').replace(/[?？。]+$/g, '');
+  const text = String(input).normalize('NFKC').replace(/[\s、,]/g, '').replace(/[?？。！!]+$/g, '');
   if (!text) return { status: 'unsupported', message: '質問を入力してください。' };
   const unsupported = ['以外', '以下', '未満', 'だけ', '現金', 'より多', 'より少'];
   const hit = unsupported.find(word => text.includes(word));
   if (hit) return { status: 'unsupported', message: `「${hit}」を含む条件にはまだ対応していません。条件を省略した検索は行いません。` };
-  const periods = [['今日', 'today'], ['昨日', 'yesterday'], ['今週', 'thisWeek'], ['先週', 'lastWeek'], ['今月', 'thisMonth'], ['先月', 'lastMonth'], ['今年', 'thisYear'], ['去年', 'lastYear']].filter(([word]) => text.includes(word));
+
+  const periodAliases = [['今日', 'today'], ['昨日', 'yesterday'], ['今週', 'thisWeek'], ['先週', 'lastWeek'], ['今月', 'thisMonth'], ['先月', 'lastMonth'], ['今年', 'thisYear'], ['去年', 'lastYear']];
+  const periods = periodAliases.filter(([word]) => text.includes(word));
   if (periods.length > 1) return { status: 'ambiguous', message: '期間の指定が矛盾しています。' };
-  const period = periods[0]?.[1] || 'all';
-  const periodPattern = '(今日|昨日|今週|先週|今月|先月|今年|去年)?';
-  const shapes = [
-    new RegExp(`^${periodPattern}(の)?(外食|食料品|食費|未分類|コンビニ)?(費|に|代)?(の)?(支出)?(合計)?(は|を|代を)?(いくら使った|いくら|見せて|表示して|何件ある|一番使ったカテゴリ|最も使ったカテゴリ|月別に表示して)$`),
-    /^1万(円)?以上の支出を見せて$/, new RegExp(`^${periodPattern}(の)?[『「].+[』」]の支出を見せて$`),
-    new RegExp(`^${periodPattern}(の)?支出合計は$`), new RegExp(`^${periodPattern}(の)?(一番|最も)使ったカテゴリは$`)
-  ];
-  if (!shapes.some(pattern => pattern.test(text))) return { status: 'unsupported', message: '対応していない条件または文型が含まれています。条件を省略した検索は行いません。' };
-  const query = { period, categoryIds: [], merchant: null, minimum: null, aggregation: 'list' };
-  if (text.includes('食費')) query.categoryIds = ['dining', 'groceries'];
-  else if (text.includes('外食')) query.categoryIds = ['dining'];
-  else if (text.includes('食料品')) query.categoryIds = ['groceries'];
-  else if (text.includes('未分類')) query.categoryIds = ['uncategorized'];
+  const query = { period: periods[0]?.[1] || 'all', categoryIds: [], merchant: null, minimum: null, aggregation: 'list' };
+
+  const quoted = text.match(/[『「](.+?)[』」]/);
   if (text.includes('コンビニ')) query.merchant = { type: 'convenience' };
-  else {
-    const quoted = text.match(/[『「](.+)[』」]/);
-    if (quoted) query.merchant = { type: 'contains', value: quoted[1] };
-  }
+  else if (quoted) query.merchant = { type: 'contains', value: quoted[1] };
   if (/1万(円)?以上/.test(text)) query.minimum = 10_000;
-  if (text.includes('一番使ったカテゴリ') || text.includes('最も使ったカテゴリ')) query.aggregation = 'topCategory';
-  else if (text.includes('月別')) query.aggregation = 'monthly';
-  else if (text.includes('何件')) query.aggregation = 'count';
-  else if (text.includes('合計') || text.includes('いくら')) query.aggregation = 'total';
-  if (query.aggregation === 'monthly' && period !== 'thisYear') return { status: 'unsupported', message: '月別表示は今年を指定した質問に対応しています。' };
+
+  const matchedCategoryWords = [];
+  if (text.includes('食費') && !text.includes('外食費')) {
+    query.categoryIds = ['dining', 'groceries'];
+    matchedCategoryWords.push('食費');
+  } else {
+    const ids = new Set();
+    for (const group of QUESTION_CATEGORY_ALIASES) {
+      const words = group.words.filter(word => text.includes(word));
+      if (words.length) { group.ids.forEach(id => ids.add(id)); matchedCategoryWords.push(...words); }
+    }
+    if (ids.size > 1) return { status: 'ambiguous', message: 'カテゴリが複数指定されています。1つのカテゴリに絞ってください。' };
+    query.categoryIds = [...ids];
+  }
+
+  const intentPatterns = [
+    { regex: /(一番|最も)使ったカテゴリ/, aggregation: 'topCategory' },
+    { regex: /月別(に)?(表示して|見せて)?/, aggregation: 'monthly' },
+    { regex: /何件(ある|ですか)?/, aggregation: 'count' },
+    { regex: /(合計|総額|いくら使った|いくら|何円)(ですか)?/, aggregation: 'total' },
+    { regex: /(一覧(で)?|見せて|表示して)/, aggregation: 'list' }
+  ];
+  const intent = intentPatterns.find(item => item.regex.test(text));
+  if (!intent) return { status: 'unsupported', message: '「合計」「何件」「見せて」など、知りたい内容を加えてください。' };
+  query.aggregation = intent.aggregation;
+  if (query.aggregation === 'monthly' && query.period !== 'thisYear') return { status: 'unsupported', message: '月別表示は「今年」を指定した質問に対応しています。' };
+
+  let remainder = text;
+  if (quoted) remainder = remainder.replace(quoted[0], '');
+  for (const [word] of periodAliases) remainder = remainder.replaceAll(word, '');
+  for (const word of [...new Set(matchedCategoryWords)].sort((a, b) => b.length - a.length)) remainder = remainder.replaceAll(word, '');
+  remainder = remainder.replace(/コンビニ/g, '').replace(/1万(円)?以上/g, '');
+  for (const item of intentPatterns) remainder = remainder.replace(item.regex, '');
+  remainder = remainder.replace(/(支出|金額|カテゴリ|利用|代|費|について)/g, '').replace(/[のはをにでがとへ]/g, '');
+  if (remainder) return { status: 'unsupported', message: `「${remainder}」を解釈できませんでした。条件を省略せず、別の言い方をお試しください。` };
   return { status: 'success', query };
 }
 
